@@ -1,0 +1,60 @@
+	    
+            if (nodeTable.getColumn("ms2mzvalues") == null) {
+            	logger.info("creating ms2mzvalues column");
+                nodeTable.createColumn("ms2mzvalues", String.class, false);
+            }
+            if (nodeTable.getColumn("ms2intensities") == null) {
+            	logger.info("creating ms2intensities column");
+                nodeTable.createColumn("ms2intensities", String.class, false);
+            }
+            else {
+            	logger.info("ms columns already exist");
+            }
+	    
+            if (nodeTable.getColumn("ms2mzvalues") == null) {
+            	logger.info("creating ms2mzvalues column");
+                nodeTable.createColumn("ms2mzvalues", String.class, false);
+            }
+            if (nodeTable.getColumn("ms2intensities") == null) {
+            	logger.info("creating ms2intensities column");
+                nodeTable.createColumn("ms2intensities", String.class, false);
+            }
+            else {
+            	logger.info("ms columns already exist");
+            }
+	    
+            if (nodeTable.getColumn("ms2mzvalues") == null) {
+            	logger.info("creating ms2mzvalues column");
+                nodeTable.createColumn("ms2mzvalues", String.class, false);
+            }
+            if (nodeTable.getColumn("ms2intensities") == null) {
+            	logger.info("creating ms2intensities column");
+                nodeTable.createColumn("ms2intensities", String.class, false);
+            }
+            else {
+            	logger.info("ms columns already exist");
+            }
+	    
+            if (nodeTable.getColumn("ms2mzvalues") == null) {
+            	logger.info("creating ms2mzvalues column");
+                nodeTable.createColumn("ms2mzvalues", String.class, false);
+            }
+            if (nodeTable.getColumn("ms2intensities") == null) {
+            	logger.info("creating ms2intensities column");
+                nodeTable.createColumn("ms2intensities", String.class, false);
+            }
+            else {
+            	logger.info("ms columns already exist");
+            }
+	    
+            if (nodeTable.getColumn("ms2mzvalues") == null) {
+            	logger.info("creating ms2mzvalues column");
+                nodeTable.createColumn("ms2mzvalues", String.class, false);
+            }
+            if (nodeTable.getColumn("ms2intensities") == null) {
+            	logger.info("creating ms2intensities column");
+                nodeTable.createColumn("ms2intensities", String.class, false);
+            }
+            else {
+            	logger.info("ms columns already exist");
+            }

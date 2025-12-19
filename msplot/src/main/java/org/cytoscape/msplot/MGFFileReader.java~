@@ -1,0 +1,132 @@
+package org.cytoscape.msplot;
+
+import org.cytoscape.model.CyNetwork;
+import org.cytoscape.model.CyNode;
+import org.cytoscape.model.CyTable;
+import org.cytoscape.model.CyRow;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.logging.Logger;
+import java.util.logging.FileHandler;
+import java.util.logging.SimpleFormatter;
+import java.util.logging.Level;
+import java.util.List;
+
+import javax.swing.JOptionPane;
+
+public class MGFFileReader {
+
+    private static final Logger logger = Logger.getLogger(MGFFileReader.class.getName());
+
+    //logger.setLoggingEnabled(false)
+    
+    static {
+        try {
+            FileHandler fileHandler = new FileHandler("msplot_filereader.log", true);
+            fileHandler.setFormatter(new SimpleFormatter());
+            logger.addHandler(fileHandler);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    // Method to set the logging level
+    public static void setLoggingEnabled(boolean enabled) {
+        if (enabled) {
+            logger.setLevel(Level.ALL); // Enable all logging levels
+        } else {
+            logger.setLevel(Level.OFF); // Disable logging
+        }
+    }
+
+    public static void readMGFFile(String filePath, CyNetwork network) {
+        logger.info("Reading MGF file: " + filePath);
+        boolean successForANode = false;
+
+        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            String featureId = null;
+            StringBuilder mzValues = new StringBuilder();
+            StringBuilder intensities = new StringBuilder();
+            Map<String, String[]> ms2DataMap = new HashMap<>();
+            
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.startsWith("BEGIN IONS")) {
+                    featureId = null;
+                    mzValues.setLength(0);
+                    intensities.setLength(0);
+                } else if (line.startsWith("FEATURE_ID=")) {
+                    featureId = line.split("=")[1];
+                } else if (line.matches("\\d+\\.\\d+ (\\d+(\\.\\d+)?(E\\d+)?)")) {
+                    String[] parts = line.split(" ");
+                    mzValues.append(parts[0]).append(",");
+                    intensities.append(parts[1]).append(",");
+                } else if (line.startsWith("END IONS") && featureId != null) {
+                    ms2DataMap.put(featureId, new String[]{mzValues.toString(), intensities.toString()});
+                }
+            }
+            
+            int size = ms2DataMap.size();
+            logger.info("Finished reading MGF file. Number of precursor ids read: " + size);
+
+            CyTable nodeTable = network.getDefaultNodeTable();
+            
+            logger.info("Retrieved default node table");
+            
+            // Check and create columns if they don't exist
+	    
+            if (nodeTable.getColumn("ms2mzvalues") == null) {
+            	logger.info("creating ms2mzvalues column");
+                nodeTable.createColumn("ms2mzvalues", String.class, false);
+            }
+            if (nodeTable.getColumn("ms2intensities") == null) {
+            	logger.info("creating ms2intensities column");
+                nodeTable.createColumn("ms2intensities", String.class, false);
+            }
+            else {
+            	logger.info("ms columns already exist");
+            }
+
+	    // Get all nodes in the network
+            List<CyNode> allNodes = network.getNodeList();
+
+            // Get the size and print it
+            int nodeCount = allNodes.size();
+            //System.out.println("Processing " + nodeCount + " nodes in the network");
+            logger.info("There are " + nodeCount + " nodes in the default node table");
+            
+            // Now iterate through the nodes
+            for (CyNode node : allNodes) {
+                CyRow row = nodeTable.getRow(node.getSUID());
+                String nodeName = row.get("name", String.class);
+                logger.info("FOUND** node: " + nodeName);
+                if (ms2DataMap.containsKey(nodeName)) {
+                	logger.info("attempt update node: " + nodeName);
+                    String[] ms2Data = ms2DataMap.get(nodeName);
+                    row.set("ms2mzvalues", ms2Data[0]);
+                    row.set("ms2intensities", ms2Data[1]);
+                    //logger.info("Updated node: " + nodeName + " mzvalues: " + ms2Data[0]);
+                    logger.info("Updated node: " + nodeName);
+                    successForANode = true;
+                } else {
+                	logger.info("did not find node in ms data: " + nodeName);
+                }
+            }
+
+        } catch (IOException e) {
+            logger.severe("Error reading MGF file: " + e.getMessage());
+            e.printStackTrace();
+        }
+        if (!successForANode) {
+        	JOptionPane.showMessageDialog(
+        			null,  // or your frame/component reference for proper parenting
+        		    "Failed to set node ms values", 
+        		    "Node set error", 
+        		    JOptionPane.INFORMATION_MESSAGE
+        		);
+        }
+    }
+} 

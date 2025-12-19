@@ -1,0 +1,1 @@
+I ended up not using Ecclipse anymore because it would jsut not compile any more and give me strange JDK/JRE/unknwon errors. just running mvn clean package seems to work much better. ecclipse is OUT!
