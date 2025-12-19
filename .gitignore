@@ -1,32 +1,13 @@
-# Ignore everything by default
-*
+# Build artifacts
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
 
-# But track these essential files and directories
-!.gitignore
-!README.md
-!PIPELINE_README.md
-!requirements.txt
-
-# Java source code
-!msplot/
-!msplot/**/*.java
-!msplot/pom.xml
-!msplot/.mvn/
-!msplot/.mvn/maven.config
-!msplot/install-deps.sh
-
-# Python scripts
-!create_test_network.py
-!create_simple_test_network.py
-!check_mzml_ms2.py
-
-# Exclude build artifacts (even in tracked directories)
-msplot/target/
-msplot/**/*.class
-msplot/**/*.jar
-!msplot/target/.gitkeep
-
-# Exclude IDE files
+# IDE files
 .idea/
 *.iml
 *.ipr
@@ -38,7 +19,7 @@ msplot/**/*.jar
 bin/
 out/
 
-# Exclude OS files
+# OS files
 .DS_Store
 .DS_Store?
 ._*
@@ -47,14 +28,13 @@ out/
 ehthumbs.db
 Thumbs.db
 
-# Exclude all test data and output files
+# Test data and output files
 sample_mzml_lq/
 *.mzML
 *.mgf
 *.xgmml
 *.cys
 *.graphml
-*.zip
 *.qza
 *.qzv
 *.tsv
@@ -64,9 +44,10 @@ test_network.*
 simple_test.*
 wild.*
 fournodes.*
-*.cys
+*_download_cytoscape_data*
+ProteoSAFe-*.zip
 
-# Exclude data directories
+# Data directories
 DB_analogresult/
 DB_result/
 clusterinfo_summary/
@@ -77,14 +58,14 @@ quantification_table_*/
 qiime2_output/
 spectra/
 
-# Exclude temporary/notes files
-*_download_cytoscape_data*
+# Temporary/notes files
 params.xml
 NOTES_*.txt
 GITHUB_SETUP.md
 #toss#
+*.log
 
-# Exclude Python artifacts
+# Python artifacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -96,5 +77,6 @@ ENV/
 .venv
 *.pyc
 
-# Log files
-*.log
+# Maven build files (keep config, ignore artifacts)
+.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
