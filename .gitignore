@@ -1,42 +1,44 @@
-# Maven
-target/
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-.mvn/wrapper/maven-wrapper.jar
+# Ignore everything by default
+*
 
-# Java
-*.class
-*.jar
-*.war
-*.ear
-*.zip
-*.tar.gz
-*.rar
-hs_err_pid*
+# But track these essential files and directories
+!.gitignore
+!README.md
+!PIPELINE_README.md
+!requirements.txt
 
-# IDE - IntelliJ IDEA
+# Java source code
+!msplot/
+!msplot/**/*.java
+!msplot/pom.xml
+!msplot/.mvn/
+!msplot/.mvn/maven.config
+!msplot/install-deps.sh
+
+# Python scripts
+!create_test_network.py
+!create_simple_test_network.py
+!check_mzml_ms2.py
+
+# Exclude build artifacts (even in tracked directories)
+msplot/target/
+msplot/**/*.class
+msplot/**/*.jar
+!msplot/target/.gitkeep
+
+# Exclude IDE files
 .idea/
-*.iws
 *.iml
 *.ipr
-out/
-
-# IDE - Eclipse
+*.iws
+.vscode/
 .classpath
 .project
 .settings/
 bin/
+out/
 
-# IDE - VS Code
-.vscode/
-
-# OS
+# Exclude OS files
 .DS_Store
 .DS_Store?
 ._*
@@ -45,21 +47,44 @@ bin/
 ehthumbs.db
 Thumbs.db
 
-# Cytoscape plugin build artifacts
-*.jar
-!msplot/target/*.jar
+# Exclude all test data and output files
+sample_mzml_lq/
+*.mzML
+*.mgf
+*.xgmml
+*.cys
+*.graphml
+*.zip
+*.qza
+*.qzv
+*.tsv
+*.csv
+*.selfloop
+test_network.*
+simple_test.*
+wild.*
+fournodes.*
+*.cys
 
-# Log files
-*.log
+# Exclude data directories
+DB_analogresult/
+DB_result/
+clusterinfo_summary/
+gnps_*/
+networkedges_*/
+networking_pairs_*/
+quantification_table_*/
+qiime2_output/
+spectra/
 
-# Test data / temporary files (uncomment if you want to exclude)
-# sample_mzml_lq/
-# *.cys
-# *.xgmml
-# *.mgf
-# test_network.*
+# Exclude temporary/notes files
+*_download_cytoscape_data*
+params.xml
+NOTES_*.txt
+GITHUB_SETUP.md
+#toss#
 
-# Python
+# Exclude Python artifacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -69,9 +94,7 @@ env/
 venv/
 ENV/
 .venv
+*.pyc
 
-# Python test outputs
-*.xgmml
-*.cys
-*.mgf
-
+# Log files
+*.log
