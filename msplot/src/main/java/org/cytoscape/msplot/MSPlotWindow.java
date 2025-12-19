@@ -41,6 +41,12 @@ import javax.swing.JOptionPane;
 import javax.swing.JCheckBoxMenuItem;
 import org.jfree.chart.ChartUtils;
 import java.io.IOException;
+import org.jfree.chart.entity.ChartEntity;
+import org.jfree.chart.entity.XYItemEntity;
+import java.awt.event.MouseEvent;
+import javax.swing.JPopupMenu;
+import org.jfree.chart.ChartMouseEvent;
+import org.jfree.chart.ChartMouseListener;
 
 public class MSPlotWindow extends JFrame {
     private final CyNetwork network;
@@ -54,6 +60,24 @@ public class MSPlotWindow extends JFrame {
     private int topK = 5; // Default top K peaks
     private double threshold = 0.5; // Default threshold for labeling
     private boolean normalizeIntensities = false; // Default to raw intensities
+    
+    // Neutral loss mode: store original m/z values and reference points
+    private double[] originalMzValues = null;  // For single plot
+    private double[] originalIntensities = null; // For single plot
+    private double[] originalMzValues1 = null; // For mirror plot series 1
+    private double[] originalIntensities1 = null; // For mirror plot series 1
+    private double[] originalMzValues2 = null; // For mirror plot series 2
+    private double[] originalIntensities2 = null; // For mirror plot series 2
+    private String currentFeatureLabel = null; // Current feature label for single plot
+    private String currentNodeName1 = null; // Current node names for mirror plot
+    private String currentNodeName2 = null;
+    private Double referenceMz = null;  // Reference m/z for neutral loss (null = disabled)
+    private Double referenceMz1 = null; // Reference m/z for mirror plot series 1
+    private Double referenceMz2 = null; // Reference m/z for mirror plot series 2
+    private Integer referenceItemIndex = null; // Item index of reference peak for single plot
+    private Integer referenceItemIndex1 = null; // Item index of reference peak for series 1
+    private Integer referenceItemIndex2 = null; // Item index of reference peak for series 2
+    private boolean isMirrorPlot = false; // Track if we're in mirror plot mode
     private static final String HELP_TEXT = String.join("\n",
     	    "MS Plot Plugin",
     	    "",
@@ -67,13 +91,21 @@ public class MSPlotWindow extends JFrame {
     	    "3. MS2 Spectra",
     	    "   • Select a node to view its MS2 spectrum.",
     	    "   • Select an edge to view a mirror plot comparing the two connected nodes.",
+    	    "   • Select two nodes (shift-click) to view a mirror plot.",
     	    "",
     	    "4. Customize View Options (under the View menu)",
     	    "   • Enable Relative Intensity Mode: scales all spectra to a max intensity of 1.",
     	    "   • Choose Peak Labeling:",
     	    "       - Top 5 or Top 10 peaks",
     	    "       - All peaks above 0.25, 0.5, or 0.75 normalized intensity",
-    	    "       - Or turn labels off entirely"
+    	    "       - Or turn labels off entirely",
+    	    "",
+    	    "5. Neutral Loss View",
+    	    "   • Click on any peak to set it as the zero point (typically the precursor ion).",
+    	    "   • All other peaks will be labeled as neutral losses (m/z difference).",
+    	    "   • The zero point peak is displayed with a dashed outline for visual indication.",
+    	    "   • To reset: View menu → Reset Zero Point, or right-click a peak → Clear Zero Point.",
+    	    "   • Neutral loss view automatically resets when selecting a different node."
     	);
     
     public MSPlotWindow(CySwingApplication cySwingApplication, CyNetwork network) {
@@ -106,7 +138,8 @@ public class MSPlotWindow extends JFrame {
             false                 // urls
         );
         
-        // Top-K mode
+        // Labeling options
+        JRadioButtonMenuItem viewAllPeaksItem = new JRadioButtonMenuItem("View All Peaks");
         JRadioButtonMenuItem noLabelsItem  = new JRadioButtonMenuItem("Hide all labels");
         JRadioButtonMenuItem top5Item = new JRadioButtonMenuItem("Label Top 5 Peaks");
         JRadioButtonMenuItem top10Item = new JRadioButtonMenuItem("Label Top 10 Peaks");
@@ -118,6 +151,7 @@ public class MSPlotWindow extends JFrame {
 
         // Add to group to enforce radio behavior
         ButtonGroup labelGroup = new ButtonGroup();
+        labelGroup.add(viewAllPeaksItem);
         labelGroup.add(noLabelsItem);
         labelGroup.add(top5Item);
         labelGroup.add(top10Item);
@@ -128,7 +162,9 @@ public class MSPlotWindow extends JFrame {
         // Set default selection
         top5Item.setSelected(true);
 
-        // Add all to menu
+        // Add all to menu (viewAllPeaksItem at the top)
+        labelingMenu.add(viewAllPeaksItem);
+        labelingMenu.addSeparator();
         labelingMenu.add(noLabelsItem);
         labelingMenu.addSeparator();        
         labelingMenu.add(top5Item);
@@ -139,6 +175,12 @@ public class MSPlotWindow extends JFrame {
         labelingMenu.add(threshold75Item);
 
         // Add behavior
+        viewAllPeaksItem.addActionListener(e -> {
+            labelAllPeaksAboveThreshold = true;
+            threshold = 0.0; // Show all peaks (any peak > 0)
+            chart.fireChartChanged();
+        });
+        
         noLabelsItem.addActionListener(e -> {
             if (labelAllPeaksAboveThreshold) {
                 threshold = 1.0;
@@ -212,6 +254,22 @@ public class MSPlotWindow extends JFrame {
             chart.fireChartChanged(); // Refresh the chart
         });
         viewMenu.add(normalizeMenuItem);
+        viewMenu.addSeparator();
+        
+        // Add menu item to reset neutral loss zero point (make it more visible)
+        JMenuItem resetZeroPointItem = new JMenuItem("Reset Zero Point");
+        resetZeroPointItem.setToolTipText("Clears the zero point and returns to absolute m/z view. Also accessible via right-click on peak.");
+        resetZeroPointItem.addActionListener(e -> {
+            referenceMz = null;
+            referenceMz1 = null;
+            referenceMz2 = null;
+            referenceItemIndex = null;
+            referenceItemIndex1 = null;
+            referenceItemIndex2 = null;
+            refreshPlot(); // Rebuild plot with original m/z values
+        });
+        viewMenu.add(resetZeroPointItem);
+        
         menuBar.add(viewMenu);
 
         // Create Help menu
@@ -255,10 +313,44 @@ public class MSPlotWindow extends JFrame {
         plot = (XYPlot) chart.getPlot();
         
         // Use XYBarRenderer with very thin bars to create vertical lines
-        XYBarRenderer renderer = new XYBarRenderer(0.0003); // Very thin bars to look like lines
+        XYBarRenderer renderer = new XYBarRenderer(0.0003) {
+            @Override
+            public java.awt.Stroke getItemOutlineStroke(int row, int column) {
+                // Use dashed stroke for reference peak (zero point), solid for others
+                if (isReferencePeak(row, column)) {
+                    float[] dash = {5.0f, 5.0f};
+                    return new BasicStroke(2.0f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f, dash, 0.0f);
+                }
+                return super.getItemOutlineStroke(row, column);
+            }
+            
+            @Override
+            public java.awt.Paint getItemOutlinePaint(int row, int column) {
+                // Use darker color for reference peak outline
+                if (isReferencePeak(row, column)) {
+                    return Color.DARK_GRAY;
+                }
+                return super.getItemOutlinePaint(row, column);
+            }
+            
+            private boolean isReferencePeak(int series, int item) {
+                if (isMirrorPlot) {
+                    if (series == 0 && referenceItemIndex1 != null && referenceItemIndex1 == item) {
+                        return true;
+                    } else if (series == 1 && referenceItemIndex2 != null && referenceItemIndex2 == item) {
+                        return true;
+                    }
+                } else {
+                    if (referenceItemIndex != null && referenceItemIndex == item) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
         renderer.setBarPainter(new StandardXYBarPainter());
         renderer.setShadowVisible(false);
-        renderer.setDrawBarOutline(false);
+        renderer.setDrawBarOutline(true); // Enable outlines so dashed stroke is visible
         renderer.setMargin(0.2); // No margin between bars
         
         // Label peaks based on the switch variable
@@ -292,6 +384,20 @@ public class MSPlotWindow extends JFrame {
         // Create the chart panel
         chartPanel = new ChartPanel(chart);
         chartPanel.setPreferredSize(new Dimension(600, 400));
+        chartPanel.setMouseZoomable(false); // Disable zoom to allow clicking
+        
+        // Add mouse listener for peak clicking
+        chartPanel.addChartMouseListener(new ChartMouseListener() {
+            @Override
+            public void chartMouseClicked(ChartMouseEvent event) {
+                handleChartMouseClick(event);
+            }
+            
+            @Override
+            public void chartMouseMoved(ChartMouseEvent event) {
+                // Optional: could show tooltip or highlight on hover
+            }
+        });
         
         // Add to frame
         getContentPane().add(chartPanel, BorderLayout.CENTER);
@@ -302,6 +408,28 @@ public class MSPlotWindow extends JFrame {
     }
     
     public void updatePlot(double[] mzValues, double[] intensities, String featureLabel) {
+        updatePlot(mzValues, intensities, featureLabel, true);
+    }
+    
+    private void updatePlot(double[] mzValues, double[] intensities, String featureLabel, boolean resetReference) {
+        // Reset neutral loss when switching to a different node (but not when refreshing)
+        if (resetReference) {
+            referenceMz = null;
+            referenceItemIndex = null;
+        }
+        
+        // Store original m/z values and intensities for neutral loss calculation
+        originalMzValues = mzValues != null ? Arrays.copyOf(mzValues, mzValues.length) : null;
+        originalIntensities = intensities != null ? Arrays.copyOf(intensities, intensities.length) : null;
+        originalMzValues1 = null;
+        originalIntensities1 = null;
+        originalMzValues2 = null;
+        originalIntensities2 = null;
+        currentFeatureLabel = featureLabel;
+        currentNodeName1 = null;
+        currentNodeName2 = null;
+        isMirrorPlot = false;
+        
         dataset.removeAllSeries();
         
         if (mzValues != null && intensities != null && mzValues.length == intensities.length) {
@@ -312,18 +440,59 @@ public class MSPlotWindow extends JFrame {
                 maxIntensity = Arrays.stream(intensities).max().orElse(1.0);
             }
 
-            for (int i = 0; i < mzValues.length; i++) {
+            // Calculate displayed m/z values (neutral loss if reference is set)
+            double[] displayMzValues = calculateDisplayMzValues(mzValues, referenceMz);
+            
+            // Find reference peak index
+            referenceItemIndex = null;
+            if (referenceMz != null && mzValues != null) {
+                for (int i = 0; i < mzValues.length; i++) {
+                    if (Math.abs(mzValues[i] - referenceMz) < 0.001) {
+                        referenceItemIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            for (int i = 0; i < displayMzValues.length; i++) {
                 double intensity = normalizeIntensities ? intensities[i] / maxIntensity : intensities[i];
-                series.add(mzValues[i], intensity);
+                series.add(displayMzValues[i], intensity);
             }
             dataset.addSeries(series);
         }
+        
+        // Update x-axis label based on neutral loss mode
+        updateXAxisLabel();
         
         // Notify the chart that the data has changed
         chart.fireChartChanged();
     }
     
     public void updateMirrorPlot(double[] mzValues1, double[] intensities1, String nodeName1, double[] mzValues2, double[] intensities2, String nodeName2) {
+        updateMirrorPlot(mzValues1, intensities1, nodeName1, mzValues2, intensities2, nodeName2, true);
+    }
+    
+    private void updateMirrorPlot(double[] mzValues1, double[] intensities1, String nodeName1, double[] mzValues2, double[] intensities2, String nodeName2, boolean resetReference) {
+        // Reset neutral loss when switching to different nodes (but not when refreshing)
+        if (resetReference) {
+            referenceMz1 = null;
+            referenceMz2 = null;
+            referenceItemIndex1 = null;
+            referenceItemIndex2 = null;
+        }
+        
+        // Store original m/z values and intensities for neutral loss calculation
+        originalMzValues = null;
+        originalIntensities = null;
+        originalMzValues1 = mzValues1 != null ? Arrays.copyOf(mzValues1, mzValues1.length) : null;
+        originalIntensities1 = intensities1 != null ? Arrays.copyOf(intensities1, intensities1.length) : null;
+        originalMzValues2 = mzValues2 != null ? Arrays.copyOf(mzValues2, mzValues2.length) : null;
+        originalIntensities2 = intensities2 != null ? Arrays.copyOf(intensities2, intensities2.length) : null;
+        currentFeatureLabel = null;
+        currentNodeName1 = nodeName1;
+        currentNodeName2 = nodeName2;
+        isMirrorPlot = true;
+        
         dataset.removeAllSeries();
         
         if (mzValues1 != null && intensities1 != null && mzValues1.length == intensities1.length) {
@@ -334,9 +503,23 @@ public class MSPlotWindow extends JFrame {
                 maxIntensity1 = Arrays.stream(intensities1).max().orElse(1.0);
             }
 
-            for (int i = 0; i < mzValues1.length; i++) {
+            // Calculate displayed m/z values (neutral loss if reference is set)
+            double[] displayMzValues1 = calculateDisplayMzValues(mzValues1, referenceMz1);
+            
+            // Find reference peak index for series 1
+            referenceItemIndex1 = null;
+            if (referenceMz1 != null && mzValues1 != null) {
+                for (int i = 0; i < mzValues1.length; i++) {
+                    if (Math.abs(mzValues1[i] - referenceMz1) < 0.001) {
+                        referenceItemIndex1 = i;
+                        break;
+                    }
+                }
+            }
+
+            for (int i = 0; i < displayMzValues1.length; i++) {
                 double intensity = normalizeIntensities ? intensities1[i] / maxIntensity1 : intensities1[i];
-                series1.add(mzValues1[i], intensity);
+                series1.add(displayMzValues1[i], intensity);
             }
             dataset.addSeries(series1);
         }
@@ -349,9 +532,23 @@ public class MSPlotWindow extends JFrame {
                 maxIntensity2 = Arrays.stream(intensities2).max().orElse(1.0);
             }
 
-            for (int i = 0; i < mzValues2.length; i++) {
+            // Calculate displayed m/z values (neutral loss if reference is set)
+            double[] displayMzValues2 = calculateDisplayMzValues(mzValues2, referenceMz2);
+            
+            // Find reference peak index for series 2
+            referenceItemIndex2 = null;
+            if (referenceMz2 != null && mzValues2 != null) {
+                for (int i = 0; i < mzValues2.length; i++) {
+                    if (Math.abs(mzValues2[i] - referenceMz2) < 0.001) {
+                        referenceItemIndex2 = i;
+                        break;
+                    }
+                }
+            }
+
+            for (int i = 0; i < displayMzValues2.length; i++) {
                 double intensity = normalizeIntensities ? intensities2[i] / maxIntensity2 : intensities2[i];
-                series2.add(mzValues2[i], -intensity); // Negate for mirror plot
+                series2.add(displayMzValues2[i], -intensity); // Negate for mirror plot
             }
             dataset.addSeries(series2);
         }
@@ -360,6 +557,9 @@ public class MSPlotWindow extends JFrame {
         XYItemRenderer renderer = plot.getRenderer();
         renderer.setSeriesPaint(0, Color.BLUE); // Blue for the top plot
         renderer.setSeriesPaint(1, Color.RED); // Red for the bottom plot
+        
+        // Update x-axis label based on neutral loss mode
+        updateXAxisLabel();
         
         // Notify the chart that the data has changed
         chart.fireChartChanged();
@@ -384,6 +584,140 @@ public class MSPlotWindow extends JFrame {
         return maxIntensity;
     }
 
+    // Handle mouse click on chart to show menu for peak options
+    private void handleChartMouseClick(ChartMouseEvent event) {
+        MouseEvent mouseEvent = event.getTrigger();
+        ChartEntity entity = event.getEntity();
+        
+        // Check if we clicked on a chart element (peak)
+        if (entity instanceof XYItemEntity) {
+            XYItemEntity itemEntity = (XYItemEntity) entity;
+            int series = itemEntity.getSeriesIndex();
+            int item = itemEntity.getItem();
+            
+            // Get the original m/z value directly using the item index
+            double originalMz = getOriginalMzByIndex(series, item);
+            
+            if (originalMz > 0) {
+                // Show popup menu at click location
+                showPeakClickMenu(mouseEvent.getX(), mouseEvent.getY(), originalMz, series, item);
+            }
+        }
+    }
+    
+    // Get original m/z value by series and item index
+    private double getOriginalMzByIndex(int series, int item) {
+        if (isMirrorPlot) {
+            if (series == 0 && originalMzValues1 != null && item < originalMzValues1.length) {
+                return originalMzValues1[item];
+            } else if (series == 1 && originalMzValues2 != null && item < originalMzValues2.length) {
+                return originalMzValues2[item];
+            }
+        } else {
+            if (originalMzValues != null && item < originalMzValues.length) {
+                return originalMzValues[item];
+            }
+        }
+        return -1; // Error
+    }
+    
+    // Show popup menu when a peak is clicked (framework for future options)
+    private void showPeakClickMenu(int x, int y, double mzValue, int series, int item) {
+        JPopupMenu popupMenu = new JPopupMenu();
+        
+        // Main action: Set as zero point for neutral loss
+        JMenuItem setZeroPointItem = new JMenuItem("Set as Neutral Loss Reference");
+        setZeroPointItem.addActionListener(e -> {
+            // Set as zero point
+            if (isMirrorPlot) {
+                if (series == 0) {
+                    referenceMz1 = mzValue;
+                    referenceItemIndex1 = item;
+                } else if (series == 1) {
+                    referenceMz2 = mzValue;
+                    referenceItemIndex2 = item;
+                }
+            } else {
+                referenceMz = mzValue;
+                referenceItemIndex = item;
+            }
+            
+            // Refresh the plot to show neutral losses
+            refreshPlot();
+        });
+        popupMenu.add(setZeroPointItem);
+        
+        // Option to clear zero point (only show if one is already set)
+        boolean hasReference = (isMirrorPlot && ((series == 0 && referenceMz1 != null) || (series == 1 && referenceMz2 != null))) ||
+                               (!isMirrorPlot && referenceMz != null);
+        
+        if (hasReference) {
+            popupMenu.addSeparator();
+            JMenuItem clearZeroPointItem = new JMenuItem("Clear Zero Point");
+            clearZeroPointItem.addActionListener(e -> {
+                if (isMirrorPlot) {
+                    if (series == 0) {
+                        referenceMz1 = null;
+                        referenceItemIndex1 = null;
+                    } else if (series == 1) {
+                        referenceMz2 = null;
+                        referenceItemIndex2 = null;
+                    }
+                } else {
+                    referenceMz = null;
+                    referenceItemIndex = null;
+                }
+                refreshPlot();
+            });
+            popupMenu.add(clearZeroPointItem);
+        }
+        
+        // Future options can be added here
+        // popupMenu.addSeparator();
+        // popupMenu.add(new JMenuItem("Future Option 1"));
+        // popupMenu.add(new JMenuItem("Future Option 2"));
+        
+        // Show menu at click location
+        popupMenu.show(chartPanel, x, y);
+    }
+    
+    // Calculate display m/z values (neutral loss if reference is set)
+    private double[] calculateDisplayMzValues(double[] mzValues, Double reference) {
+        if (reference == null || mzValues == null) {
+            return mzValues != null ? Arrays.copyOf(mzValues, mzValues.length) : null;
+        }
+        
+        double[] result = new double[mzValues.length];
+        for (int i = 0; i < mzValues.length; i++) {
+            result[i] = mzValues[i] - reference; // Neutral loss
+        }
+        return result;
+    }
+    
+    // Update x-axis label based on neutral loss mode
+    private void updateXAxisLabel() {
+        NumberAxis domainAxis = (NumberAxis) plot.getDomainAxis();
+        if ((!isMirrorPlot && referenceMz != null) || 
+            (isMirrorPlot && (referenceMz1 != null || referenceMz2 != null))) {
+            domainAxis.setLabel("Neutral Loss (m/z)");
+        } else {
+            domainAxis.setLabel("m/z");
+        }
+    }
+    
+    // Refresh the plot with current data and neutral loss settings
+    private void refreshPlot() {
+        // Rebuild the plot using stored data (don't reset references - preserve current neutral loss settings)
+        if (isMirrorPlot && originalMzValues1 != null && originalIntensities1 != null && 
+            originalMzValues2 != null && originalIntensities2 != null && 
+            currentNodeName1 != null && currentNodeName2 != null) {
+            updateMirrorPlot(originalMzValues1, originalIntensities1, currentNodeName1,
+                           originalMzValues2, originalIntensities2, currentNodeName2, false);
+        } else if (!isMirrorPlot && originalMzValues != null && originalIntensities != null && currentFeatureLabel != null) {
+            updatePlot(originalMzValues, originalIntensities, currentFeatureLabel, false);
+        }
+    }
+    
     // Method to save the chart as a PNG file
     public void saveChartAsPNG(File file) {
         try {

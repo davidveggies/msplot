@@ -1,7 +1,10 @@
 package org.cytoscape.msplot;
 
 import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 import org.cytoscape.model.CyRow;
+import org.cytoscape.model.CyTable;
 import org.cytoscape.model.events.RowsSetEvent;
 import org.cytoscape.model.events.RowsSetListener;
 import java.util.logging.*;
@@ -51,13 +54,62 @@ public class NodeSelectionListener implements RowsSetListener {
         }
         
         try {
-            // Get the first selected row
-            CyRow selectedRow = e.getSource().getAllRows().stream()
+            CyTable nodeTable = e.getSource();
+            
+            // Get all selected rows
+            List<CyRow> selectedRows = nodeTable.getAllRows().stream()
                 .filter(row -> row.get("selected", Boolean.class))
-                .findFirst()
-                .orElse(null);
+                .collect(Collectors.toList());
+            
+            int selectedCount = selectedRows.size();
+            logger.info("Number of selected nodes: " + selectedCount);
+            
+            // If exactly 2 nodes selected, show mirror plot
+            if (selectedCount == 2) {
+                CyRow row1 = selectedRows.get(0);
+                CyRow row2 = selectedRows.get(1);
                 
-            if (selectedRow != null) {
+                // Get node names
+                String nodeName1 = getCellAsString(row1, "name");
+                String nodeName2 = getCellAsString(row2, "name");
+                
+                // Get MS2 data for both nodes
+                String mzValuesStr1 = row1.get("ms2mzvalues", String.class);
+                String intensitiesStr1 = row1.get("ms2intensities", String.class);
+                String mzValuesStr2 = row2.get("ms2mzvalues", String.class);
+                String intensitiesStr2 = row2.get("ms2intensities", String.class);
+                
+                if (mzValuesStr1 != null && intensitiesStr1 != null && 
+                    mzValuesStr2 != null && intensitiesStr2 != null) {
+                    
+                    double[] mzValues1 = Arrays.stream(mzValuesStr1.split(","))
+                        .map(String::trim)
+                        .mapToDouble(Double::parseDouble)
+                        .toArray();
+                    double[] intensities1 = Arrays.stream(intensitiesStr1.split(","))
+                        .map(String::trim)
+                        .mapToDouble(Double::parseDouble)
+                        .toArray();
+                    double[] mzValues2 = Arrays.stream(mzValuesStr2.split(","))
+                        .map(String::trim)
+                        .mapToDouble(Double::parseDouble)
+                        .toArray();
+                    double[] intensities2 = Arrays.stream(intensitiesStr2.split(","))
+                        .map(String::trim)
+                        .mapToDouble(Double::parseDouble)
+                        .toArray();
+                    
+                    logger.info("Showing mirror plot for nodes: " + nodeName1 + " and " + nodeName2);
+                    plotWindow.updateMirrorPlot(mzValues1, intensities1, nodeName1, 
+                                                mzValues2, intensities2, nodeName2);
+                } else {
+                    logger.warning("Missing MS2 data for one or both selected nodes.");
+                }
+            } 
+            // If exactly 1 node selected, show regular plot
+            else if (selectedCount == 1) {
+                CyRow selectedRow = selectedRows.get(0);
+                
                 // Get the mz values and intensities from the node attributes
                 String mzValuesStr = selectedRow.get("ms2mzvalues", String.class);
                 String intensitiesStr = selectedRow.get("ms2intensities", String.class);
@@ -105,6 +157,7 @@ public class NodeSelectionListener implements RowsSetListener {
                     logger.warning("Node attributes 'mzvalues' or 'intensities' are null.");
                 }
             }
+            // If 0 or more than 2 nodes selected, do nothing (or could clear the plot)
         } catch (Exception ex) {
             logger.severe("Error processing node selection: " + ex.getMessage());
             ex.printStackTrace();
